@@ -114,6 +114,10 @@ class PricingEngine:
 
             params = self.calibrated_params
 
+            # Each strike gets a unique seed derived from K so that MC errors
+            # across strikes are independent (avoids systematic bias in the chain).
+            strike_seed = int(abs(K) * 100) % (2**31 - 1)
+
             if option_type == "call":
                 price = price_european_call(
                     S0=S,
@@ -127,7 +131,7 @@ class PricingEngine:
                     rho=params["rho"],
                     n_paths=12000,
                     n_steps=252,
-                    seed=42,
+                    seed=strike_seed,
                 )
             else:
                 price = price_european_put(
@@ -142,7 +146,7 @@ class PricingEngine:
                     rho=params["rho"],
                     n_paths=12000,
                     n_steps=252,
-                    seed=42,
+                    seed=strike_seed + 1,
                 )
 
         self.cache[key] = price

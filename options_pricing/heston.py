@@ -97,6 +97,46 @@ def heston_simulate(
     return prices, variances
 
 
+def _simulate_from_normals(S0, v0, kappa, theta, xi, rho, r, T, z1, z2):
+    """
+    Internal helper: simulate Heston paths from pre-generated standard normals.
+
+    Separating normal generation from simulation enables antithetic variates:
+    call once with (z1, z2) and once with (-z1, -z2) using the same arrays.
+
+    Parameters
+    ----------
+    z1, z2 : np.ndarray of shape (n_paths, n_steps)
+        Pre-generated standard normals. z2 must already embed the
+        rho correlation structure (i.e. z2 = rho*z1 + sqrt(1-rho^2)*eps).
+
+    Returns
+    -------
+    terminal_prices : np.ndarray of shape (n_paths,)
+        Terminal stock prices S_T for each path.
+    """
+    n_paths, n_steps = z1.shape
+    dt      = T / n_steps
+    sqrt_dt = np.sqrt(dt)
+
+    S = np.full(n_paths, float(S0))
+    V = np.full(n_paths, float(v0))
+
+    for t in range(n_steps):
+        v_prev = np.maximum(V, 0.0)
+        V = np.maximum(
+            V + kappa * (theta - v_prev) * dt
+            + xi * np.sqrt(v_prev) * sqrt_dt * z1[:, t],
+            0.0,
+        )
+        S = S * np.exp(
+            (r - 0.5 * v_prev) * dt
+            + np.sqrt(v_prev) * sqrt_dt * z2[:, t]
+        )
+
+    return S
+
+
 def price_european_call(
     S0,
     K,
@@ -171,6 +211,80 @@ def price_european_put(
     option_price = np.exp(-r * T) * np.mean(payoffs)
 
     return option_price
+
+
+def price_european_call_av(
+    S0,
+    K,
+    T,
+    r,
+    v0,
+    kappa,
+    theta,
+    xi,
+    rho,
+    n_paths=10000,
+    n_steps=252,
+    seed=None,
+):
+    """
+    Price a European call using antithetic variates variance reduction.
+
+    Antithetic variates pair each path  (z1, z2)  with its mirror
+    (-z1, -z2). Since payoffs are convex in S_T, the pairing introduces
+    negative correlation between the two samples, cutting variance by
+    30-70 % versus plain MC for the same path count.
+
+    Parameters
+    ----------
+    Same as price_european_call.
+
+    Returns
+    -------
+    float
+        Estimated call price (lower variance than price_european_call).
+    """
+    half = n_paths // 2
+    z1, z2 = generate_correlated_normals(half, n_steps, rho, seed=seed)
+
+    S_orig = _simulate_from_normals(S0, v0, kappa, theta, xi, rho, r, T, z1, z2)
+    S_anti = _simulate_from_normals(S0, v0, kappa, theta, xi, rho, r, T, -z1, -z2)
+
+    payoffs_orig = np.maximum(S_orig - K, 0.0)
+    payoffs_anti = np.maximum(S_anti - K, 0.0)
+
+    payoffs_av = 0.5 * (payoffs_orig + payoffs_anti)
+
+    return float(np.exp(-r * T) * np.mean(payoffs_av))
+
+
+def price_european_put_av(
+    S0,
+    K,
+    T,
+    r,
+    v0,
+    kappa,
+    theta,
+    xi,
+    rho,
+    n_paths=10000,
+    n_steps=252,
+    seed=None,
+):
+    """European put with antithetic variates. See price_european_call_av."""
+    half = n_paths // 2
+    z1, z2 = generate_correlated_normals(half, n_steps, rho, seed=seed)
+
+    S_orig = _simulate_from_normals(S0, v0, kappa, theta, xi, rho, r, T, z1, z2)
+    S_anti = _simulate_from_normals(S0, v0, kappa, theta, xi, rho, r, T, -z1, -z2)
+
+    payoffs_orig = np.maximum(K - S_orig, 0.0)
+    payoffs_anti = np.maximum(K - S_anti, 0.0)
+
+    payoffs_av = 0.5 * (payoffs_orig + payoffs_anti)
+
+    return float(np.exp(-r * T) * np.mean(payoffs_av))
 
 
 def plot_paths(paths, n_show=20):

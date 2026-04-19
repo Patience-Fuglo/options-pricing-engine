@@ -73,8 +73,7 @@ def simulate_heston_paths(
     V : ndarray of shape (n_steps + 1, n_paths)
         Simulated variance paths
     """
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     dt = T / n_steps
 
@@ -88,8 +87,8 @@ def simulate_heston_paths(
     # Generate correlated Brownian increments
     # dW_1 and dW_2 with correlation rho
     for t in range(1, n_steps + 1):
-        Z1 = np.random.standard_normal(n_paths)
-        Z2 = np.random.standard_normal(n_paths)
+        Z1 = rng.standard_normal(n_paths)
+        Z2 = rng.standard_normal(n_paths)
 
         # Create correlated increments
         dW_S = Z1 * np.sqrt(dt)
